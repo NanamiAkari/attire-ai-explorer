@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -41,7 +41,7 @@ export const MultiSelectImageGrid: React.FC<MultiSelectImageGridProps> = ({
     setRetryingIndex(index);
     try {
       const newResult = await retryAnalysis(result);
-      onUpdate?.(index, newResult);
+      // onUpdate?.(index, newResult); // 历史记录页面不需要更新功能
       
       if (newResult.isError) {
         toast({
