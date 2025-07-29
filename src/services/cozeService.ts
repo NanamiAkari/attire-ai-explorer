@@ -629,18 +629,179 @@ export const retryAnalysis = async (result: AnalysisResult): Promise<AnalysisRes
   }
 };
 
-export const analyzeBatchImages = async (files: File[]): Promise<AnalysisResult[]> => {
+export const analyzeBatchImages = async (files: File[], onProgress?: (current: number, total: number, fileName: string) => void): Promise<AnalysisResult[]> => {
   const results: AnalysisResult[] = [];
+  const { checkDuplicateResult } = await import('./storageService');
   
-  for (const file of files) {
+  for (let i = 0; i < files.length; i++) {
+    const file = files[i];
+    
     try {
+      // 更新进度
+      onProgress?.(i + 1, files.length, file.name);
+      
+      // 创建临时的AnalysisResult用于查重检查
+      const tempResult: AnalysisResult = {
+        imageUrl: '',
+        tags: {} as any,
+        confidence: 0,
+        analysisTime: Date.now(),
+        fileName: file.name
+      };
+      
+      // 检查是否为重复图片
+      const duplicateResult = checkDuplicateResult(tempResult);
+      if (duplicateResult) {
+        console.log(`跳过重复图片: ${file.name}，使用已有分析结果`);
+        // 如果重复结果的图片URL是base64格式，直接使用；否则创建新的blob URL
+        let imageUrl = duplicateResult.imageUrl;
+        if (!imageUrl || (!imageUrl.startsWith('data:') && !imageUrl.startsWith('http'))) {
+          imageUrl = URL.createObjectURL(file);
+        }
+        const updatedResult = {
+          ...duplicateResult,
+          imageUrl,
+          analysisTime: duplicateResult.analysisTime || 0 // 确保重复结果的分析时间为0或原值
+        };
+        results.push(updatedResult);
+        continue;
+      }
+      
+      // 如果不是重复图片，进行分析
+      console.log(`开始分析新图片: ${file.name} (${i + 1}/${files.length})`);
       const result = await analyzeClothingImage(file);
       results.push(result);
+      
     } catch (error) {
       console.error(`分析图片 ${file.name} 失败:`, error);
-      // 继续处理其他图片
+      
+      // 创建错误结果
+      const errorResult: AnalysisResult = {
+        imageUrl: URL.createObjectURL(file),
+        tags: {
+          样式名称: '分析失败',
+          颜色: '未识别',
+          色调: '未识别',
+          领: '未识别',
+          袖: '未识别',
+          版型: '未识别',
+          长度: '未识别',
+          面料: '未识别',
+          图案: '未识别',
+          工艺: '未识别',
+          场合: '未识别',
+          季节: '未识别',
+          风格: '未识别'
+        },
+        confidence: 0,
+        analysisTime: 0,
+        isError: true,
+        error: error.message || '分析失败',
+        fileName: file.name
+      };
+      
+      results.push(errorResult);
     }
   }
   
+  return results;
+};
+
+// 批量分析图片（带查重和进度回调的增强版本）
+export const analyzeBatchImagesWithDeduplication = async (
+  files: File[], 
+  onProgress?: (current: number, total: number, fileName: string, isDuplicate?: boolean) => void
+): Promise<AnalysisResult[]> => {
+  const results: AnalysisResult[] = [];
+  const { loadAnalysisResults } = await import('./storageService');
+  let duplicateCount = 0;
+  let newAnalysisCount = 0;
+  
+  console.log(`开始批量分析 ${files.length} 张图片，启用查重功能...`);
+  
+  // 一次性加载所有已有结果，避免重复查询
+  const existingResults = loadAnalysisResults();
+  console.log(`已加载 ${existingResults.length} 条历史记录用于查重`);
+  
+  // 创建文件名到结果的映射，提高查找效率
+  const existingResultsMap = new Map<string, AnalysisResult>();
+  existingResults.forEach(result => {
+    if (result.fileName) {
+      existingResultsMap.set(result.fileName, result);
+    }
+  });
+  
+  for (let i = 0; i < files.length; i++) {
+    const file = files[i];
+    
+    try {
+      // 检查是否为重复图片（使用Map快速查找）
+       const duplicateResult = existingResultsMap.get(file.name);
+       if (duplicateResult) {
+         duplicateCount++;
+         console.log(`[${i + 1}/${files.length}] 跳过重复图片: ${file.name}`);
+         
+         // 更新进度（标记为重复）
+         onProgress?.(i + 1, files.length, file.name, true);
+         
+         // 如果重复结果的图片URL是base64格式，直接使用；否则创建新的blob URL
+         let imageUrl = duplicateResult.imageUrl;
+         if (!imageUrl || (!imageUrl.startsWith('data:') && !imageUrl.startsWith('http'))) {
+           imageUrl = URL.createObjectURL(file);
+         }
+         const updatedResult = {
+           ...duplicateResult,
+           imageUrl,
+           analysisTime: duplicateResult.analysisTime || 0 // 确保重复结果的分析时间为0或原值
+         };
+         results.push(updatedResult);
+         continue;
+       }
+      
+      // 如果不是重复图片，进行分析
+      newAnalysisCount++;
+      console.log(`[${i + 1}/${files.length}] 开始分析新图片: ${file.name}`);
+      
+      // 更新进度（标记为新分析）
+      onProgress?.(i + 1, files.length, file.name, false);
+      
+      const result = await analyzeClothingImage(file);
+      results.push(result);
+      
+      console.log(`[${i + 1}/${files.length}] 分析完成: ${file.name}`);
+      
+    } catch (error) {
+      console.error(`[${i + 1}/${files.length}] 分析图片 ${file.name} 失败:`, error);
+      
+      // 创建错误结果
+      const errorResult: AnalysisResult = {
+        imageUrl: URL.createObjectURL(file),
+        tags: {
+          样式名称: '分析失败',
+          颜色: '未识别',
+          色调: '未识别',
+          领: '未识别',
+          袖: '未识别',
+          版型: '未识别',
+          长度: '未识别',
+          面料: '未识别',
+          图案: '未识别',
+          工艺: '未识别',
+          场合: '未识别',
+          季节: '未识别',
+          风格: '未识别'
+        },
+        confidence: 0,
+        analysisTime: 0,
+        isError: true,
+        error: error.message || '分析失败',
+        fileName: file.name
+      };
+      
+      results.push(errorResult);
+    }
+  }
+  
+  console.log(`批量分析完成: 总计 ${files.length} 张图片，新分析 ${newAnalysisCount} 张，跳过重复 ${duplicateCount} 张`);
   return results;
 };

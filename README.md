@@ -49,13 +49,49 @@ Attire AI Explorer 是一个基于人工智能的智能服装识别系统，能�
    cp .env.example .env
    ```
    
-   编辑 `.env` 文件，填入您的OpenAI API密钥：
+   编辑 `.env` 文件，填入配置信息：
    ```env
-   VITE_OPENAI_API_KEY=your_openai_api_key_here
+   # Coze API配置
+   VITE_COZE_API_TOKEN=your_coze_api_token_here
+   VITE_COZE_BOT_ID=your_bot_id_here
+   
+   # 后端API配置
+   VITE_API_BASE_URL=http://localhost:3001/api
+   
+   # PostgreSQL数据库配置
+   VITE_DB_HOST=localhost
+   VITE_DB_PORT=5432
+   VITE_DB_NAME=clothing_analysis
+   VITE_DB_USER=postgres
+   VITE_DB_PASSWORD=your_password_here
    ```
 
-4. **启动项目**
+4. **设置数据库**
+   
+   确保PostgreSQL服务正在运行，并创建数据库：
+   ```sql
+   CREATE DATABASE clothing_analysis;
+   ```
+
+5. **启动后端服务器**
    ```bash
+   # 进入服务器目录
+   cd server
+   
+   # 安装依赖
+   npm install
+   
+   # 启动后端服务器
+   npm start
+   ```
+   
+   后端服务器将在 `http://localhost:3001` 启动。
+
+6. **启动前端项目**
+   ```bash
+   # 返回项目根目录
+   cd ..
+   
    # 开发模式
    npm run dev
    

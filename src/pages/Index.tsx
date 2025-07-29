@@ -9,7 +9,7 @@ import { SimilaritySearch } from '@/components/SimilaritySearch';
 import { ImageGrid } from '@/components/ImageGrid';
 import { Instructions } from '@/components/Instructions';
 import { TestMode } from '@/components/TestMode';
-import { analyzeClothingImage, AnalysisResult } from '@/services/cozeService';
+import { analyzeClothingImage, AnalysisResult, analyzeBatchImagesWithDeduplication } from '@/services/cozeService';
 import { 
   loadAnalysisResults, 
   saveAnalysisResults, 
@@ -21,11 +21,12 @@ import {
   getAnalysisHistory, 
   searchAnalysisRecords,
   saveAnalysisToDatabase,
+  saveBatchAnalysisToDatabase,
   updateAnalysisRecord,
   ClothingAnalysisRecord 
 } from '@/services/databaseService';
 import { useToast } from '@/hooks/use-toast';
-import { Sparkles, Upload, Search, Grid, Loader2, History, Database, Image as ImageIcon } from 'lucide-react';
+import { Sparkles, Upload, Search, Grid, Loader2, History, Database, Image as ImageIcon, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 const Index = () => {
@@ -37,6 +38,7 @@ const Index = () => {
   const [searchSource, setSearchSource] = useState<'local' | 'database'>('local');
   const [isLoadingDatabase, setIsLoadingDatabase] = useState(false);
   const [showAllResults, setShowAllResults] = useState(false);
+  const [hasSimilaritySearchResults, setHasSimilaritySearchResults] = useState(false);
   const [filters, setFilters] = useState<SearchFiltersType>({
     searchText: '',
     tags: [],
@@ -70,8 +72,8 @@ const Index = () => {
 
     const checkDatabaseConnection = async () => {
       try {
-        const { checkSupabaseConnection } = await import('../config/supabase');
-        const isConnected = await checkSupabaseConnection();
+        const { checkDatabaseConnection } = await import('../services/databaseService');
+    const isConnected = await checkDatabaseConnection();
         if (!isConnected) {
           toast({
             title: "数据库连接异常",
@@ -248,7 +250,7 @@ const Index = () => {
 
   // 当databaseResults或filters变化时更新filteredDatabaseResults
   useEffect(() => {
-    if (searchSource === 'database') {
+    if (searchSource === 'database' && !hasSimilaritySearchResults) {
       let filtered = databaseResults;
       
       // 文本搜索
@@ -358,10 +360,50 @@ const Index = () => {
       
       setFilteredDatabaseResults(filtered);
     }
-  }, [databaseResults, filters, searchSource]);
+  }, [databaseResults, filters, searchSource, hasSimilaritySearchResults]);
 
   const handleSimilaritySearchResults = (searchResults: AnalysisResult[]) => {
-    setFilteredResults(searchResults);
+    if (searchSource === 'local') {
+      setFilteredResults(searchResults);
+      setHasSimilaritySearchResults(searchResults.length > 0);
+    } else {
+      // 将AnalysisResult转换为ClothingAnalysisRecord格式，保留相似度信息
+      const databaseSearchResults = searchResults.map(result => {
+        // 查找对应的数据库记录
+        const dbRecord = databaseResults.find(record => record.image_url === result.imageUrl);
+        const baseRecord = dbRecord || {
+          id: Math.random().toString(),
+          image_name: 'similarity_result',
+          image_url: result.imageUrl,
+          tags: result.tags,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        };
+        // 添加相似度信息到记录中
+        return {
+          ...baseRecord,
+          similarity: result.similarity,
+          combinedScore: (result as any).combinedScore,
+          tagSimilarity: (result as any).tagSimilarity
+        };
+      });
+      setFilteredDatabaseResults(databaseSearchResults);
+      setHasSimilaritySearchResults(searchResults.length > 0);
+    }
+  };
+
+  // 清除搜索结果
+  const handleClearSearchResults = () => {
+    if (searchSource === 'local') {
+      setFilteredResults(results);
+    } else {
+      setFilteredDatabaseResults(databaseResults);
+    }
+    setHasSimilaritySearchResults(false);
+    toast({
+      title: "已清除搜索结果",
+      description: "已恢复显示所有结果",
+    });
   };
 
   const handleImageUpload = useCallback(async (files: File[]) => {
@@ -432,7 +474,7 @@ const Index = () => {
           // 如果是数据库相关错误，提供更详细的信息
           if (errorMessage.includes('Failed to fetch') || errorMessage.includes('network')) {
             errorMessage = '网络连接失败，请检查网络设置';
-          } else if (errorMessage.includes('supabase') || errorMessage.includes('database')) {
+          } else if (errorMessage.includes('database')) {
             errorMessage = '数据库连接失败，结果已保存到本地历史记录';
           }
           
@@ -454,110 +496,77 @@ const Index = () => {
     setIsAnalyzing(true);
     
     try {
-      const newResults: AnalysisResult[] = [];
-      const failedFiles: string[] = [];
+      console.log(`开始批量分析 ${files.length} 张图片，启用查重功能...`);
       
-      // 顺序处理文件以避免QPS限制（每秒最多1次调用）
-      for (let i = 0; i < files.length; i++) {
-        const file = files[i];
-        let retryCount = 0;
-        const maxRetries = 3;
-        let success = false;
+      // 使用新的带查重功能的批量分析函数
+      const results = await analyzeBatchImagesWithDeduplication(
+        files,
+        (current, total, fileName, isDuplicate) => {
+          // 更新进度提示
+          const statusText = isDuplicate ? '跳过重复' : '分析中';
+          toast({
+            title: "分析进度",
+            description: `${statusText}: ${fileName} (${current}/${total})`,
+          });
+        }
+      );
+      
+      // 统计结果
+      const newAnalysisCount = results.filter(r => !r.isError && r.analysisTime > 0).length;
+      const duplicateCount = results.filter(r => !r.isError && r.analysisTime === 0).length;
+      const errorCount = results.filter(r => r.isError).length;
+      
+      // 批量更新结果
+      if (results.length > 0) {
+        setResults(prev => [...prev, ...results]);
         
-        while (!success && retryCount <= maxRetries) {
+        // 批量保存成功分析的结果到数据库（只保存新分析的结果）
+        const newResults = results.filter(r => !r.isError && r.analysisTime > 0);
+        if (newResults.length > 0) {
           try {
-            console.log(`正在分析第 ${i + 1}/${files.length} 张图片: ${file.name}${retryCount > 0 ? ` (重试 ${retryCount}/${maxRetries})` : ''}`);
+            console.log(`开始批量保存 ${newResults.length} 条新分析结果到数据库...`);
             
-            // 如果不是第一张图片或者是重试，等待更长时间以避免QPS限制
-            if (i > 0 || retryCount > 0) {
-              const waitTime = retryCount > 0 ? 2000 * Math.pow(2, retryCount) : 2000; // 指数退避
-              console.log(`等待 ${waitTime}ms 以避免QPS限制...`);
-              await new Promise(resolve => setTimeout(resolve, waitTime));
-            }
+            // 准备批量保存的数据
+            const batchData = newResults
+              .map(result => {
+                const correspondingFile = files.find(f => f.name === result.fileName);
+                if (correspondingFile) {
+                  return { result, file: correspondingFile };
+                } else {
+                  console.warn('未找到对应的文件对象:', result.fileName);
+                  return null;
+                }
+              })
+              .filter(Boolean) as { result: AnalysisResult; file: File }[];
             
-            const result = await analyzeClothingImage(file);
-            newResults.push(result);
-            success = true;
+            // 使用优化的批量保存函数
+            await saveBatchAnalysisToDatabase(batchData);
             
-            // 实时更新进度
-            toast({
-              title: "分析进度",
-              description: `已完成 ${i + 1}/${files.length} 张图片分析${retryCount > 0 ? ` (重试成功)` : ''}`,
-            });
-            
-          } catch (error) {
-            console.error(`分析图片 ${file.name} 失败 (尝试 ${retryCount + 1}/${maxRetries + 1}):`, error);
-            
-            // 检查是否是QPS限制错误
-            const isQpsError = error.message?.includes('qps too high') || 
-                              error.message?.includes('720711011') || 
-                              error.message?.includes('Pro call plugin qps too high');
-            
-            if (isQpsError && retryCount < maxRetries) {
-              retryCount++;
-              const waitTime = 3000 * Math.pow(2, retryCount); // 指数退避：6秒、12秒、24秒
-              console.log(`检测到QPS限制，等待 ${waitTime}ms 后重试...`);
-              toast({
-                title: "QPS限制",
-                description: `${file.name} 遇到频率限制，${waitTime/1000}秒后重试 (${retryCount}/${maxRetries})`,
-              });
-              await new Promise(resolve => setTimeout(resolve, waitTime));
-            } else {
-              // 非QPS错误或重试次数用完
-              failedFiles.push(file.name);
-              if (retryCount >= maxRetries) {
-                toast({
-                  title: "分析失败",
-                  description: `${file.name} 重试 ${maxRetries} 次后仍然失败`,
-                  variant: "destructive",
-                });
-              }
-              break;
-            }
+            console.log('批量保存到数据库完成');
+          } catch (dbError) {
+            console.warn('批量保存到数据库失败:', dbError);
           }
         }
-      }
-      
-      // 添加成功的结果
-      if (newResults.length > 0) {
-        setResults(prev => [...prev, ...newResults]);
-      }
-      
-      // 根据结果显示不同的提示信息
-      if (failedFiles.length === 0) {
+        
+        // 显示完成提示
+        let description = `处理完成: 新分析 ${newAnalysisCount} 张`;
+        if (duplicateCount > 0) {
+          description += `，跳过重复 ${duplicateCount} 张`;
+        }
+        if (errorCount > 0) {
+          description += `，失败 ${errorCount} 张`;
+        }
+        
         toast({
           title: "批量分析完成",
-          description: `成功分析了 ${files.length} 张图片`,
+          description,
         });
-      } else if (newResults.length === 0) {
-        toast({
-          title: "批量分析失败",
-          description: "所有图片分析失败，请检查图片格式或网络连接",
-          variant: "destructive",
-        });
-        throw new Error("所有图片分析失败");
-      } else {
-        toast({
-          title: "批量分析部分完成",
-          description: `成功分析 ${newResults.length} 张，失败 ${failedFiles.length} 张图片`,
-          variant: "default",
-        });
-        
-        // 显示失败的文件列表
-        if (failedFiles.length <= 3) {
-          toast({
-            title: "分析失败的文件",
-            description: failedFiles.join(', '),
-            variant: "destructive",
-          });
-        } else {
-          toast({
-            title: "分析失败的文件",
-            description: `${failedFiles.slice(0, 3).join(', ')} 等 ${failedFiles.length} 个文件`,
-            variant: "destructive",
-          });
-        }
       }
+      
+      if (errorCount === files.length) {
+        throw new Error("所有图片分析失败");
+      }
+      
     } catch (error) {
       console.error('批量分析过程出错:', error);
       if (!error.message?.includes("所有图片分析失败")) {
@@ -603,7 +612,11 @@ const Index = () => {
       confidence: record.confidence || 0, // 移除假置信度数据
       analysisTime: record.analysis_time || 0,
       createdAt: record.created_at,
-      fileSize: record.file_size || 0
+      fileSize: record.file_size || 0,
+      // 保留相似度信息
+      similarity: (record as any).similarity,
+      combinedScore: (record as any).combinedScore,
+      tagSimilarity: (record as any).tagSimilarity
     };
   };
 
@@ -705,7 +718,7 @@ const Index = () => {
       {/* 主要内容 */}
       <div className="container mx-auto px-4 py-6">
         <Tabs defaultValue="instructions" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-5 lg:w-[600px]">
+          <TabsList className="grid w-full grid-cols-4 lg:w-[500px]">
             <TabsTrigger value="instructions" className="flex items-center space-x-2">
               <Sparkles className="h-4 w-4" />
               <span>使用说明</span>
@@ -716,11 +729,7 @@ const Index = () => {
             </TabsTrigger>
             <TabsTrigger value="search" className="flex items-center space-x-2">
               <Search className="h-4 w-4" />
-              <span>搜索筛选</span>
-            </TabsTrigger>
-            <TabsTrigger value="similarity" className="flex items-center space-x-2">
-              <ImageIcon className="h-4 w-4" />
-              <span>相似搜索</span>
+              <span>智能搜索</span>
             </TabsTrigger>
             <TabsTrigger value="test" className="flex items-center space-x-2">
               <Grid className="h-4 w-4" />
@@ -791,32 +800,36 @@ const Index = () => {
             )}
           </TabsContent>
 
-          {/* 搜索筛选页面 */}
+          {/* 智能搜索页面 - 合并搜索筛选和相似搜索 */}
           <TabsContent value="search" className="space-y-6">
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center space-x-2">
-                  <Search className="h-5 w-5 text-fashion-primary" />
-                  <span>搜索与筛选</span>
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-4">
-                  {/* 数据源切换 */}
-                  <div className="flex items-center gap-4 p-4 bg-gray-50 rounded-lg">
-                    <span className="text-sm font-medium text-gray-700">数据源:</span>
-                    <div className="flex gap-2">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-[calc(100vh-200px)]">
+              {/* 左侧：搜索控制面板 */}
+              <div className="lg:col-span-1 overflow-y-auto pr-2 space-y-6 search-scrollbar">
+                {/* 数据源切换 */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center space-x-2">
+                      <Database className="h-5 w-5 text-fashion-primary" />
+                      <span>数据源选择</span>
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-3">
                       <Button
                         variant={searchSource === 'local' ? 'default' : 'outline'}
-                        size="sm"
-                        onClick={() => setSearchSource('local')}
+                        className="w-full justify-start"
+                        onClick={() => {
+                          setSearchSource('local');
+                        }}
                       >
                         本地结果 ({results.length})
                       </Button>
                       <Button
                         variant={searchSource === 'database' ? 'default' : 'outline'}
-                        size="sm"
-                        onClick={() => setSearchSource('database')}
+                        className="w-full justify-start"
+                        onClick={() => {
+                          setSearchSource('database');
+                        }}
                         disabled={isLoadingDatabase}
                       >
                         {isLoadingDatabase ? (
@@ -832,74 +845,44 @@ const Index = () => {
                         <Button
                           variant="outline"
                           size="sm"
+                          className="w-full"
                           onClick={loadDatabaseRecords}
                           disabled={isLoadingDatabase}
                         >
-                          刷新
+                          刷新数据库
                         </Button>
                       )}
                     </div>
-                  </div>
-                  
-                  <SearchFilters 
-                     filters={filters} 
-                     onFiltersChange={setFilters}
-                     results={searchSource === 'local' ? results : databaseResults.map(record => ({
-                       id: record.id,
-                       imageUrl: record.image_url,
-                       tags: record.tags,
-                       timestamp: new Date(record.created_at).getTime()
-                     }))}
-                   />
-                </div>
-              </CardContent>
-            </Card>
-            
-            {(searchSource === 'local' ? filteredResults.length > 0 : filteredDatabaseResults.length > 0) && (
-              <Card>
-                <CardHeader>
-                  <CardTitle>
-                    {searchSource === 'local' ? (
-                      `搜索结果 (${filteredResults.length})`
-                    ) : (
-                      `数据库搜索结果 (${filteredDatabaseResults.length})`
-                    )}
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  {searchSource === 'local' ? (
-                    <ImageGrid
-                      results={filteredResults}
-                      onResultUpdate={handleResultUpdate}
-                    />
-                  ) : (
-                    <ImageGrid
-                      results={filteredDatabaseResults.map(convertDatabaseRecordToAnalysisResult)}
-                      onTagUpdate={(index, updatedTags) => {
-                        const record = filteredDatabaseResults[index];
-                        if (record) {
-                          handleDatabaseTagUpdate(record, updatedTags);
-                        }
-                      }}
-                      onDelete={(index) => {
-                        const record = filteredDatabaseResults[index];
-                        if (record) {
-                          handleDatabaseDelete(record);
-                        }
-                      }}
-                    />
-                  )}
-                </CardContent>
-              </Card>
-            )}
-          </TabsContent>
+                  </CardContent>
+                </Card>
 
-          {/* 相似搜索页面 */}
-          <TabsContent value="similarity" className="space-y-6">
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              <div className="lg:col-span-1">
+                {/* 搜索筛选 */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center space-x-2">
+                      <Search className="h-5 w-5 text-fashion-primary" />
+                      <span>条件筛选</span>
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <SearchFilters 
+                      filters={filters} 
+                      onFiltersChange={(newFilters) => {
+                        setFilters(newFilters);
+                      }}
+                      results={searchSource === 'local' ? results : databaseResults.map(record => ({
+                        id: record.id,
+                        imageUrl: record.image_url,
+                        tags: record.tags,
+                        timestamp: new Date(record.created_at).getTime()
+                      }))}
+                    />
+                  </CardContent>
+                </Card>
+
+                {/* 相似搜索 */}
                 <SimilaritySearch 
-                  results={searchSource === 'local' ? results : databaseResults.map(record => ({
+                  results={searchSource === 'local' ? filteredResults : filteredDatabaseResults.map(record => ({
                     imageUrl: record.image_url,
                     tags: record.tags,
                     confidence: 0,
@@ -909,69 +892,33 @@ const Index = () => {
                 />
               </div>
               
-              <div className="lg:col-span-2">
-                {/* 数据源切换 */}
-                <Card className="mb-6">
-                  <CardHeader>
-                    <CardTitle className="flex items-center space-x-2">
-                      <Database className="h-5 w-5 text-fashion-primary" />
-                      <span>数据源选择</span>
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="flex items-center gap-4">
-                      <span className="text-sm font-medium text-gray-700">搜索范围:</span>
-                      <div className="flex gap-2">
-                        <Button
-                          variant={searchSource === 'local' ? 'default' : 'outline'}
-                          size="sm"
-                          onClick={() => setSearchSource('local')}
-                        >
-                          本地结果 ({results.length})
-                        </Button>
-                        <Button
-                          variant={searchSource === 'database' ? 'default' : 'outline'}
-                          size="sm"
-                          onClick={() => setSearchSource('database')}
-                          disabled={isLoadingDatabase}
-                        >
-                          {isLoadingDatabase ? (
-                            <>
-                              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                              加载中...
-                            </>
+              {/* 右侧：搜索结果展示 */}
+              <div className="lg:col-span-2 overflow-y-auto pl-2 custom-scrollbar">
+                {(searchSource === 'local' ? filteredResults.length > 0 : filteredDatabaseResults.length > 0) ? (
+                  <Card className="h-full">
+                    <CardHeader className="sticky top-0 bg-white z-10 border-b">
+                      <div className="flex items-center justify-between">
+                        <CardTitle>
+                          {searchSource === 'local' ? (
+                            `搜索结果 (${filteredResults.length})`
                           ) : (
-                            `数据库记录 (${databaseResults.length})`
+                            `数据库搜索结果 (${filteredDatabaseResults.length})`
                           )}
-                        </Button>
-                        {searchSource === 'database' && (
+                        </CardTitle>
+                        {hasSimilaritySearchResults && (
                           <Button
-                            variant="outline"
+                            variant="ghost"
                             size="sm"
-                            onClick={loadDatabaseRecords}
-                            disabled={isLoadingDatabase}
+                            onClick={handleClearSearchResults}
+                            className="text-muted-foreground hover:text-foreground"
                           >
-                            刷新
+                            <X className="h-4 w-4 mr-1" />
+                            清除搜索结果
                           </Button>
                         )}
                       </div>
-                    </div>
-                  </CardContent>
-                </Card>
-                
-                {/* 相似搜索结果展示 */}
-                {(searchSource === 'local' ? filteredResults.length > 0 : filteredDatabaseResults.length > 0) && (
-                  <Card>
-                    <CardHeader>
-                      <CardTitle>
-                        {searchSource === 'local' ? (
-                          `相似搜索结果 (${filteredResults.length})`
-                        ) : (
-                          `数据库相似搜索结果 (${filteredDatabaseResults.length})`
-                        )}
-                      </CardTitle>
                     </CardHeader>
-                    <CardContent>
+                    <CardContent className="pb-6">
                       {searchSource === 'local' ? (
                         <ImageGrid
                           results={filteredResults}
@@ -996,27 +943,24 @@ const Index = () => {
                       )}
                     </CardContent>
                   </Card>
-                )}
-                
-                {/* 空状态提示 */}
-                {(searchSource === 'local' ? filteredResults.length === 0 : filteredDatabaseResults.length === 0) && (
-                  <Card>
+                ) : (
+                  <Card className="h-full flex items-center justify-center">
                     <CardContent className="flex flex-col items-center justify-center py-12">
                       <div className="text-center space-y-3">
                         <div className="w-16 h-16 mx-auto bg-fashion-light rounded-full flex items-center justify-center">
-                          <ImageIcon className="h-8 w-8 text-fashion-primary" />
+                          <Search className="h-8 w-8 text-fashion-primary" />
                         </div>
                         <h3 className="text-lg font-semibold text-foreground">
-                          等待相似搜索
+                          开始智能搜索
                         </h3>
-                        <p className="text-muted-foreground">
+                        <p className="text-muted-foreground max-w-md">
                           {searchSource === 'local' 
                             ? results.length === 0 
-                              ? '请先上传图片进行分析，然后上传参考图片开始相似搜索'
-                              : '请在左侧上传参考图片开始相似搜索'
+                              ? '请先上传图片进行分析，然后使用左侧的筛选条件或相似搜索功能'
+                              : '使用左侧的筛选条件缩小搜索范围，或上传参考图片进行相似搜索'
                             : databaseResults.length === 0
                               ? '数据库中暂无记录，请切换到本地结果或等待数据库加载'
-                              : '请在左侧上传参考图片开始相似搜索'
+                              : '使用左侧的筛选条件缩小搜索范围，或上传参考图片进行相似搜索'
                           }
                         </p>
                       </div>
@@ -1026,6 +970,8 @@ const Index = () => {
               </div>
             </div>
           </TabsContent>
+
+
 
           {/* 测试模式页面 */}
           <TabsContent value="test" className="space-y-6">

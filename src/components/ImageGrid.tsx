@@ -131,19 +131,51 @@ export const ImageGrid: React.FC<ImageGridProps> = ({
 
               {/* 基本信息 */}
               <div className="space-y-3">
-                <div className="flex items-center justify-between flex-wrap gap-2">
-                  <div className="flex items-center space-x-2 flex-wrap">
-                    {/* 相似度徽章 - 绿色，仅在有真实相似度数据时显示 */}
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex flex-col gap-1 min-w-0 flex-1">
+                    {/* 相似度徽章 - 垂直排列避免错位 */}
                     {result.similarity !== undefined && result.similarity > 0 && (
-                      <Badge 
-                        variant="outline" 
-                        className="border-green-500 text-green-600 bg-green-50 hover:bg-green-100 transition-colors font-medium"
-                      >
-                        相似度 {Math.round(result.similarity)}%
-                      </Badge>
+                      <>
+                        {/* 综合评分（如果有标签相似度重排序） */}
+                        {(result as any).combinedScore !== undefined ? (
+                          <Badge 
+                            variant="outline" 
+                            className="border-purple-500 text-purple-600 bg-purple-50 hover:bg-purple-100 transition-colors font-medium w-fit"
+                          >
+                            综合 {Math.round((result as any).combinedScore > 1 ? (result as any).combinedScore : (result as any).combinedScore * 100)}%
+                          </Badge>
+                        ) : (
+                          <Badge 
+                            variant="outline" 
+                            className="border-green-500 text-green-600 bg-green-50 hover:bg-green-100 transition-colors font-medium w-fit"
+                          >
+                            图片 {Math.round(result.similarity * 100)}%
+                          </Badge>
+                        )}
+                        
+                        {/* 图片相似度（当有综合评分时也显示） */}
+                        {(result as any).combinedScore !== undefined && (
+                          <Badge 
+                            variant="outline" 
+                            className="border-green-500 text-green-600 bg-green-50 hover:bg-green-100 transition-colors font-medium text-xs w-fit"
+                          >
+                            图片 {Math.round(result.similarity * 100)}%
+                          </Badge>
+                        )}
+                        
+                        {/* 标签相似度（如果有） */}
+                        {(result as any).tagSimilarity !== undefined && (
+                          <Badge 
+                            variant="outline" 
+                            className="border-blue-500 text-blue-600 bg-blue-50 hover:bg-blue-100 transition-colors font-medium text-xs w-fit"
+                          >
+                            标签 {Math.round((result as any).tagSimilarity)}%
+                          </Badge>
+                        )}
+                      </>
                     )}
                   </div>
-                  <div className="flex items-center text-xs text-muted-foreground">
+                  <div className="flex items-center text-xs text-muted-foreground whitespace-nowrap flex-shrink-0">
                     <Clock className="h-3 w-3 mr-1" />
                     {result.analysisTime}ms
                   </div>
@@ -261,7 +293,7 @@ export const ImageGrid: React.FC<ImageGridProps> = ({
                                   variant="outline" 
                                   className="border-green-500 text-green-600 bg-green-50 font-medium"
                                 >
-                                  相似度 {Math.round(selectedResult.similarity)}%
+                                  相似度 {Math.round(selectedResult.similarity * 100)}%
                                 </Badge>
                               )}
                             </div>

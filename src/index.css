@@ -120,3 +120,60 @@ All colors MUST be HSL.
     @apply bg-background text-foreground;
   }
 }
+
+/* 自定义滚动条样式 */
+@layer utilities {
+  /* Webkit 浏览器滚动条样式 */
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-track {
+    background: hsl(var(--fashion-light));
+    border-radius: 4px;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    background: hsl(var(--fashion-primary) / 0.3);
+    border-radius: 4px;
+    transition: background-color 0.2s ease;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--fashion-primary) / 0.5);
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-thumb:active {
+    background: hsl(var(--fashion-primary) / 0.7);
+  }
+
+  /* Firefox 滚动条样式 */
+  .custom-scrollbar {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--fashion-primary) / 0.3) hsl(var(--fashion-light));
+  }
+
+  /* 搜索区域专用滚动条样式 */
+  .search-scrollbar::-webkit-scrollbar {
+    width: 6px;
+  }
+
+  .search-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .search-scrollbar::-webkit-scrollbar-thumb {
+    background: hsl(var(--fashion-primary) / 0.2);
+    border-radius: 3px;
+  }
+
+  .search-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--fashion-primary) / 0.4);
+  }
+
+  .search-scrollbar {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--fashion-primary) / 0.2) transparent;
+  }
+}

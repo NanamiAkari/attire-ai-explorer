@@ -15,7 +15,7 @@ import {
   getAnalysisStats,
   ClothingAnalysisRecord
 } from '@/services/databaseService';
-import { checkSupabaseConnection } from '@/config/supabase';
+import { checkDatabaseConnection } from '@/services/databaseService';
 import { MultiSelectDatabaseGrid } from '@/components/MultiSelectDatabaseGrid';
 import { AnalysisResult } from '@/services/cozeService';
 
@@ -44,10 +44,10 @@ const DatabasePage: React.FC = () => {
   useEffect(() => {
     const checkConnection = async () => {
       try {
-        const connected = await checkSupabaseConnection();
+        const connected = await checkDatabaseConnection();
         setIsConnected(connected);
         if (!connected) {
-          setError('无法连接到Supabase数据库，请检查配置');
+          setError('无法连接到PostgreSQL数据库，请检查配置');
         }
       } catch (err) {
         setIsConnected(false);
@@ -230,6 +230,9 @@ const DatabasePage: React.FC = () => {
 
   // 渲染标签
   const renderTags = (tags: any) => {
+    if (!tags || typeof tags !== 'object') {
+      return null;
+    }
     return Object.entries(tags)
       .filter(([_, value]) => value && value !== '未识别')
       .map(([key, value]) => (
@@ -245,7 +248,7 @@ const DatabasePage: React.FC = () => {
         <Alert>
           <AlertCircle className="h-4 w-4" />
           <AlertDescription>
-            {error || '数据库未连接。请确保已正确配置Supabase连接信息。'}
+            {error || '数据库未连接。请确保已正确配置PostgreSQL连接信息。'}
           </AlertDescription>
         </Alert>
         
@@ -260,22 +263,19 @@ const DatabasePage: React.FC = () => {
             <div className="space-y-4">
               <p>要使用数据库功能，请按以下步骤配置：</p>
               <ol className="list-decimal list-inside space-y-2">
-                <li>在Supabase中创建一个新项目</li>
-                <li>创建名为 <code>clothing_analysis</code> 的表，包含以下字段：
+                <li>安装并启动PostgreSQL数据库服务</li>
+                <li>创建一个名为 <code>clothing_analysis</code> 的数据库</li>
+                <li>运行 init-database.cjs 脚本来创建表结构</li>
+                <li>复制 .env.example 为 .env</li>
+                <li>在 .env 文件中配置PostgreSQL连接信息：
                   <ul className="list-disc list-inside ml-4 mt-2">
-                    <li>id (uuid, primary key)</li>
-                    <li>image_url (text)</li>
-                    <li>image_name (text)</li>
-                    <li>image_size (bigint)</li>
-                    <li>tags (jsonb)</li>
-                    <li>confidence (real)</li>
-                    <li>analysis_time (bigint)</li>
-                    <li>created_at (timestamp with time zone)</li>
-                    <li>updated_at (timestamp with time zone)</li>
+                    <li>VITE_DB_HOST (数据库主机地址)</li>
+                    <li>VITE_DB_PORT (数据库端口)</li>
+                    <li>VITE_DB_NAME (数据库名称)</li>
+                    <li>VITE_DB_USER (数据库用户名)</li>
+                    <li>VITE_DB_PASSWORD (数据库密码)</li>
                   </ul>
                 </li>
-                <li>复制 .env.example 为 .env</li>
-                <li>在 .env 文件中填入你的Supabase URL和API密钥</li>
               </ol>
             </div>
           </CardContent>
@@ -412,7 +412,7 @@ const DatabasePage: React.FC = () => {
                 </CardHeader>
                 <CardContent>
                   <div className="space-y-1">
-                    {Object.entries(stats.tagStats.样式名称)
+                    {stats.tagStats?.样式名称 ? Object.entries(stats.tagStats.样式名称)
                       .sort(([,a], [,b]) => (b as number) - (a as number))
                       .slice(0, 5)
                       .map(([style, count]) => (
@@ -420,7 +420,7 @@ const DatabasePage: React.FC = () => {
                           <span>{style}</span>
                           <Badge variant="secondary">{count as number}</Badge>
                         </div>
-                      ))}
+                      )) : <div className="text-gray-500">暂无数据</div>}
                   </div>
                 </CardContent>
               </Card>
@@ -431,7 +431,7 @@ const DatabasePage: React.FC = () => {
                 </CardHeader>
                 <CardContent>
                   <div className="space-y-1">
-                    {Object.entries(stats.tagStats.颜色)
+                    {stats.tagStats?.颜色 ? Object.entries(stats.tagStats.颜色)
                       .sort(([,a], [,b]) => (b as number) - (a as number))
                       .slice(0, 5)
                       .map(([color, count]) => (
@@ -439,7 +439,7 @@ const DatabasePage: React.FC = () => {
                           <span>{color}</span>
                           <Badge variant="secondary">{count as number}</Badge>
                         </div>
-                      ))}
+                      )) : <div className="text-gray-500">暂无数据</div>}
                   </div>
                 </CardContent>
               </Card>

@@ -184,10 +184,10 @@ export const MultiSelectImageGrid: React.FC<MultiSelectImageGridProps> = ({
                     ) : (
                       <>
                         <div className="text-sm font-medium text-foreground">
-                          {result.tags.样式名称 || result.tags.样式 || '未识别'}
+                          {result.tags?.样式名称 || result.tags?.样式 || '未识别'}
                         </div>
                         <div className="flex flex-wrap gap-1">
-                          {[
+                          {result.tags ? [
                             { label: '颜色', value: result.tags.颜色 },
                             { label: '领型', value: result.tags.领型 },
                             { label: '袖型', value: result.tags.袖型 }
@@ -201,7 +201,7 @@ export const MultiSelectImageGrid: React.FC<MultiSelectImageGridProps> = ({
                               >
                                 {item.label}: {item.value}
                               </Badge>
-                            ))
+                            )) : null
                           }
                         </div>
                       </>

@@ -5,7 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { AnalysisResult, retryAnalysis } from '@/services/cozeService';
-import { ClothingAnalysisRecord } from '@/config/supabase';
+import { ClothingAnalysisRecord } from '@/config/postgresql';
 import { TagEditor } from './TagEditor';
 import { Eye, Clock, Target, Trash2, Database, RefreshCw, AlertCircle } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
@@ -185,10 +185,10 @@ export const MultiSelectDatabaseGrid: React.FC<MultiSelectDatabaseGridProps> = (
                     ) : (
                       <>
                         <div className="text-sm font-medium text-foreground">
-                          {result.tags.样式名称 || result.tags.样式 || '未识别'}
+                          {result.tags?.样式名称 || result.tags?.样式 || '未识别'}
                         </div>
                         <div className="flex flex-wrap gap-1">
-                          {[
+                          {result.tags ? [
                             { label: '颜色', value: result.tags.颜色 },
                             { label: '领型', value: result.tags.领型 },
                             { label: '袖型', value: result.tags.袖型 }
@@ -202,7 +202,7 @@ export const MultiSelectDatabaseGrid: React.FC<MultiSelectDatabaseGridProps> = (
                               >
                                 {item.label}: {item.value}
                               </Badge>
-                            ))
+                            )) : null
                           }
                         </div>
                       </>

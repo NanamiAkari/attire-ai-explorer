@@ -15,20 +15,33 @@ interface TagEditorProps {
   className?: string;
 }
 
+// 按照任务说明书图1的顺序：基础属性 -> 设计细节 -> 材质工艺 -> 功能属性
 const TAG_LABELS: Record<keyof ClothingTags, string> = {
+  // 基础属性
   样式名称: '样式名称',
   颜色: '颜色',
   色调: '色调',
+  // 设计细节
   领: '领型',
   袖: '袖型',
   版型: '版型',
   长度: '长度',
+  // 材质工艺
   面料: '面料',
   图案: '图案',
   工艺: '工艺',
+  // 功能属性
   场合: '场合',
   季节: '季节',
   风格: '风格'
+};
+
+// 标签分组定义，用于更好的展示
+const TAG_GROUPS = {
+  基础属性: ['样式名称', '颜色', '色调'],
+  设计细节: ['领', '袖', '版型', '长度'],
+  材质工艺: ['面料', '图案', '工艺'],
+  功能属性: ['场合', '季节', '风格']
 };
 
 export const TagEditor: React.FC<TagEditorProps> = ({ tags, onTagsUpdate, className }) => {
@@ -89,14 +102,25 @@ export const TagEditor: React.FC<TagEditorProps> = ({ tags, onTagsUpdate, classN
             <Edit className="h-4 w-4" />
           </Button>
         </CardHeader>
-        <CardContent className="space-y-2">
-          <div className="flex flex-wrap gap-1">
-            {Object.entries(tags).map(([key, value]) => (
-              <Badge key={key} variant="secondary" className="text-xs">
-                {TAG_LABELS[key as keyof ClothingTags] || key}: {value}
-              </Badge>
-            ))}
-          </div>
+        <CardContent className="space-y-3">
+          {/* 按分组展示标签 */}
+          {Object.entries(TAG_GROUPS).map(([groupName, tagKeys]) => {
+            const groupTags = tagKeys.filter(key => tags[key as keyof ClothingTags]);
+            if (groupTags.length === 0) return null;
+            
+            return (
+              <div key={groupName} className="space-y-1">
+                <div className="text-xs font-medium text-muted-foreground">{groupName}</div>
+                <div className="flex flex-wrap gap-1">
+                  {groupTags.map((key) => (
+                    <Badge key={key} variant="secondary" className="text-xs">
+                      {TAG_LABELS[key as keyof ClothingTags]}: {tags[key as keyof ClothingTags]}
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
         </CardContent>
       </Card>
     );
