@@ -39,6 +39,8 @@ const Index = () => {
   const [isLoadingDatabase, setIsLoadingDatabase] = useState(false);
   const [showAllResults, setShowAllResults] = useState(false);
   const [hasSimilaritySearchResults, setHasSimilaritySearchResults] = useState(false);
+  const [similaritySearchResults, setSimilaritySearchResults] = useState<AnalysisResult[]>([]);
+  const [similarityDatabaseResults, setSimilarityDatabaseResults] = useState<ClothingAnalysisRecord[]>([]);
   const [filters, setFilters] = useState<SearchFiltersType>({
     searchText: '',
     tags: [],
@@ -128,10 +130,11 @@ const Index = () => {
     }
   }, [results]);
 
-  // 当results或filters变化时更新filteredResults
+  // 当results、similaritySearchResults或filters变化时更新filteredResults
   useEffect(() => {
     if (searchSource === 'local') {
-      let filtered = results;
+      // 如果有相似搜索结果，基于相似搜索结果进行筛选；否则基于原始results
+      let filtered = hasSimilaritySearchResults ? similaritySearchResults : results;
       
       // 文本搜索
       if (filters.searchText.trim()) {
@@ -246,7 +249,7 @@ const Index = () => {
       
       setFilteredResults(filtered);
     }
-  }, [results, filters, searchSource]);
+  }, [results, filters, searchSource, hasSimilaritySearchResults, similaritySearchResults]);
 
   // 当databaseResults或filters变化时更新filteredDatabaseResults
   useEffect(() => {
@@ -362,8 +365,123 @@ const Index = () => {
     }
   }, [databaseResults, filters, searchSource, hasSimilaritySearchResults]);
 
+  // 当数据库相似度搜索结果或filters变化时更新filteredDatabaseResults
+  useEffect(() => {
+    if (searchSource === 'database' && hasSimilaritySearchResults) {
+      let filtered = similarityDatabaseResults;
+      
+      // 文本搜索
+      if (filters.searchText.trim()) {
+        const searchLower = filters.searchText.toLowerCase();
+        filtered = filtered.filter(record => 
+          record.image_name.toLowerCase().includes(searchLower) ||
+          Object.values(record.tags).some(tag => 
+            typeof tag === 'string' && tag.toLowerCase().includes(searchLower)
+          )
+        );
+      }
+      
+      // 样式筛选
+      if (filters.style.length > 0) {
+        filtered = filtered.filter(record => 
+          filters.style.includes(record.tags.样式名称)
+        );
+      }
+      
+      // 颜色筛选
+      if (filters.color.length > 0) {
+        filtered = filtered.filter(record => 
+          filters.color.includes(record.tags.颜色)
+        );
+      }
+      
+      // 色调筛选
+      if (filters.tone && filters.tone.length > 0) {
+        filtered = filtered.filter(record => 
+          filters.tone.includes(record.tags.色调)
+        );
+      }
+      
+      // 季节筛选
+      if (filters.season.length > 0) {
+        filtered = filtered.filter(record => {
+          const itemSeason = record.tags.季节;
+          if (itemSeason === '四季通用') {
+            return true;
+          }
+          if (filters.season.includes('四季通用')) {
+            return true;
+          }
+          return filters.season.includes(itemSeason);
+        });
+      }
+      
+      // 其他筛选条件...
+      if (filters.collar.length > 0) {
+        filtered = filtered.filter(record => 
+          filters.collar.includes(record.tags.领)
+        );
+      }
+      
+      if (filters.sleeve.length > 0) {
+        filtered = filtered.filter(record => 
+          filters.sleeve.includes(record.tags.袖)
+        );
+      }
+      
+      if (filters.fit.length > 0) {
+        filtered = filtered.filter(record => 
+          filters.fit.includes(record.tags.版型)
+        );
+      }
+      
+      if (filters.fabric.length > 0) {
+        filtered = filtered.filter(record => 
+          filters.fabric.includes(record.tags.面料)
+        );
+      }
+      
+      // 长度筛选
+      if (filters.length && filters.length.length > 0) {
+        filtered = filtered.filter(record => 
+          filters.length.includes(record.tags.长度)
+        );
+      }
+      
+      // 图案筛选
+      if (filters.pattern && filters.pattern.length > 0) {
+        filtered = filtered.filter(record => 
+          filters.pattern.includes(record.tags.图案)
+        );
+      }
+      
+      // 工艺筛选
+      if (filters.craft && filters.craft.length > 0) {
+        filtered = filtered.filter(record => 
+          filters.craft.includes(record.tags.工艺)
+        );
+      }
+      
+      // 风格筛选
+      if (filters.fashionStyle && filters.fashionStyle.length > 0) {
+        filtered = filtered.filter(record => 
+          filters.fashionStyle.includes(record.tags.风格)
+        );
+      }
+      
+      if (filters.occasion.length > 0) {
+        filtered = filtered.filter(record => 
+          filters.occasion.includes(record.tags.场合)
+        );
+      }
+      
+      setFilteredDatabaseResults(filtered);
+    }
+  }, [filters, searchSource, hasSimilaritySearchResults, similarityDatabaseResults]);
+
   const handleSimilaritySearchResults = (searchResults: AnalysisResult[]) => {
     if (searchSource === 'local') {
+      setSimilaritySearchResults(searchResults);
       setFilteredResults(searchResults);
       setHasSimilaritySearchResults(searchResults.length > 0);
     } else {
@@ -387,6 +505,7 @@ const Index = () => {
           tagSimilarity: (result as any).tagSimilarity
         };
       });
+      setSimilarityDatabaseResults(databaseSearchResults);
       setFilteredDatabaseResults(databaseSearchResults);
       setHasSimilaritySearchResults(searchResults.length > 0);
     }
@@ -395,8 +514,10 @@ const Index = () => {
   // 清除搜索结果
   const handleClearSearchResults = () => {
     if (searchSource === 'local') {
+      setSimilaritySearchResults([]);
       setFilteredResults(results);
     } else {
+      setSimilarityDatabaseResults([]);
       setFilteredDatabaseResults(databaseResults);
     }
     setHasSimilaritySearchResults(false);
@@ -893,10 +1014,10 @@ const Index = () => {
               </div>
               
               {/* 右侧：搜索结果展示 */}
-              <div className="lg:col-span-2 overflow-y-auto pl-2 custom-scrollbar">
+              <div className="lg:col-span-2 flex flex-col min-h-0">
                 {(searchSource === 'local' ? filteredResults.length > 0 : filteredDatabaseResults.length > 0) ? (
-                  <Card className="h-full">
-                    <CardHeader className="sticky top-0 bg-white z-10 border-b">
+                  <Card className="flex flex-col h-full">
+                    <CardHeader className="flex-shrink-0 border-b">
                       <div className="flex items-center justify-between">
                         <CardTitle>
                           {searchSource === 'local' ? (
@@ -918,7 +1039,7 @@ const Index = () => {
                         )}
                       </div>
                     </CardHeader>
-                    <CardContent className="pb-6">
+                    <CardContent className="flex-1 overflow-y-auto custom-scrollbar pb-6">
                       {searchSource === 'local' ? (
                         <ImageGrid
                           results={filteredResults}
